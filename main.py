@@ -1,14 +1,10 @@
 import os
-import sys
 import sqlite3
 from datetime import datetime
-# DON'T CHANGE THIS !!!
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from flask import Flask, request, jsonify, send_from_directory
+from memory import memory_bp
 
-from flask import Flask, request, jsonify
-from src.routes.memory import memory_bp
-
-app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
+app = Flask(__name__)
 app.config['SECRET_KEY'] = 'ora-memory-secret-key-2024'
 
 # Register memory routes
@@ -52,22 +48,9 @@ def init_db():
         )
     ''')
     
-    # User insights table (for behavioral patterns)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_insights (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            insight_type TEXT,
-            insight_value TEXT,
-            confidence_score REAL,
-            created_at TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
-        )
-    ''')
-    
     conn.commit()
     conn.close()
-    print(f"✅ Database initialized at: {db_path}")
+    print(f"✅ Database initialized")
 
 # Health check endpoint
 @app.route('/health')
@@ -99,7 +82,7 @@ def root():
 @app.route('/admin')
 def admin_panel():
     """Serve the admin panel HTML"""
-    return app.send_static_file('admin.html')
+    return send_from_directory('.', 'admin.html')
 
 if __name__ == '__main__':
     # Initialize database on startup
@@ -108,9 +91,7 @@ if __name__ == '__main__':
     print("🚀 Starting ORA Memory API...")
     print("📊 Database: SQLite")
     print("🧠 Memory: Enabled")
-    print("🔗 Ready for Make.com integration!")
     print("🎯 Admin Panel: Available at /admin")
     
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
