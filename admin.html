@@ -251,6 +251,39 @@
             color: #c62828;
         }
 
+        .test-section {
+            background: #fff3e0;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 2px solid #ff9800;
+        }
+
+        .test-section h3 {
+            color: #e65100;
+            margin-bottom: 15px;
+        }
+
+        .test-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .test-btn {
+            background: #ff9800;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .test-btn:hover {
+            background: #f57c00;
+        }
+
         @media (max-width: 768px) {
             .main-content {
                 grid-template-columns: 1fr;
@@ -305,7 +338,18 @@
                     <h2>👥 Users</h2>
                     <button class="refresh-btn" onclick="loadUsers()">Refresh</button>
                 </div>
-                <input type="text" class="search-box" id="userSearch" placeholder="Search users..." onkeyup="filterUsers()">
+                
+                <div class="test-section">
+                    <h3>🧪 Test Data</h3>
+                    <p>Create some test data to see the admin panel in action:</p>
+                    <div class="test-controls">
+                        <button class="test-btn" onclick="createTestUser()">Create Test User</button>
+                        <button class="test-btn" onclick="addTestConversation()">Add Test Conversation</button>
+                    </div>
+                    <div id="testStatus"></div>
+                </div>
+                
+                <input type="text" class="search-box" id="userSearch" placeholder="Search users or enter user ID..." onkeyup="handleUserSearch(event)">
                 <div id="usersList" class="loading">Loading users...</div>
             </div>
 
@@ -322,7 +366,8 @@
     </div>
 
     <script>
-        const API_BASE = 'https://3dhkilcqdpg7.manus.space';
+        // Use the current domain for API calls
+        const API_BASE = window.location.origin;
         let allUsers = [];
         let selectedUserId = null;
 
@@ -350,27 +395,74 @@
             }
         }
 
-        // Load all users (simulated - you'll need to add this endpoint to your API)
+        // Load all users
         async function loadUsers() {
             try {
                 document.getElementById('usersList').innerHTML = '<div class="loading">Loading users...</div>';
                 
-                // Since there's no "get all users" endpoint, we'll show a message
-                document.getElementById('usersList').innerHTML = `
-                    <div class="empty-state">
-                        <p><strong>Note:</strong> To view users, you'll need to add a "get all users" endpoint to your memory API.</p>
-                        <p>For now, you can test with a specific user ID below:</p>
-                        <input type="text" class="search-box" placeholder="Enter user ID to test..." onkeyup="testSpecificUser(this.value)">
-                    </div>
-                `;
+                const response = await fetch(`${API_BASE}/api/memory/get-all-users`);
                 
-                // Update stats with placeholder data
-                document.getElementById('totalUsers').textContent = '?';
-                document.getElementById('totalConversations').textContent = '?';
-                document.getElementById('activeToday').textContent = '?';
+                if (response.ok) {
+                    const data = await response.json();
+                    allUsers = data.users || [];
+                    displayUsers(allUsers);
+                    updateStats(data.stats);
+                } else {
+                    throw new Error('Failed to load users');
+                }
                 
             } catch (error) {
                 document.getElementById('usersList').innerHTML = `<div class="error">Error loading users: ${error.message}</div>`;
+            }
+        }
+
+        // Display users
+        function displayUsers(users) {
+            if (users.length === 0) {
+                document.getElementById('usersList').innerHTML = `
+                    <div class="empty-state">
+                        <p>No users found. Create some test data to get started!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const usersHtml = users.map(user => `
+                <div class="user-item ${selectedUserId === user.user_id ? 'active' : ''}" onclick="selectUser('${user.user_id}')">
+                    <div class="user-id">${user.name || user.user_id}</div>
+                    <div class="user-stats">
+                        ID: ${user.user_id} • ${user.total_conversations || 0} conversations
+                        ${user.last_visit ? `• Last: ${new Date(user.last_visit).toLocaleDateString()}` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('usersList').innerHTML = usersHtml;
+        }
+
+        // Update stats
+        function updateStats(stats) {
+            if (stats) {
+                document.getElementById('totalUsers').textContent = stats.total_users || 0;
+                document.getElementById('totalConversations').textContent = stats.total_conversations || 0;
+                document.getElementById('activeToday').textContent = stats.active_today || 0;
+            }
+        }
+
+        // Handle user search
+        function handleUserSearch(event) {
+            const searchTerm = event.target.value.toLowerCase();
+            
+            if (event.key === 'Enter' && searchTerm.trim()) {
+                // If Enter is pressed, try to load specific user
+                testSpecificUser(searchTerm.trim());
+            } else {
+                // Filter existing users
+                const filteredUsers = allUsers.filter(user => 
+                    user.user_id.toLowerCase().includes(searchTerm) ||
+                    (user.name && user.name.toLowerCase().includes(searchTerm))
+                );
+                displayUsers(filteredUsers);
             }
         }
 
@@ -389,7 +481,8 @@
                 
                 if (response.ok) {
                     const userData = await response.json();
-                    displayUserData(userId, userData);
+                    // Refresh users list to include this user
+                    await loadUsers();
                     selectedUserId = userId;
                     loadConversations();
                 } else {
@@ -398,20 +491,6 @@
             } catch (error) {
                 console.error('Error testing user:', error);
             }
-        }
-
-        // Display user data
-        function displayUserData(userId, userData) {
-            const userHtml = `
-                <div class="user-item active" onclick="selectUser('${userId}')">
-                    <div class="user-id">User: ${userId}</div>
-                    <div class="user-stats">
-                        ${userData.total_conversations || 0} conversations • 
-                        ${userData.is_new_user ? 'New User' : 'Returning User'}
-                    </div>
-                </div>
-            `;
-            document.getElementById('usersList').innerHTML = userHtml;
         }
 
         // Load conversations for selected user
@@ -449,14 +528,14 @@
         // Display conversations
         function displayConversations(conversations) {
             if (conversations.length === 0) {
-                document.getElementById('conversationsList').innerHTML = '<div class="empty-state">No conversations found</div>';
+                document.getElementById('conversationsList').innerHTML = '<div class="empty-state">No conversations found for this user</div>';
                 return;
             }
 
             const conversationsHtml = conversations.map(conv => `
                 <div class="conversation-item">
                     <div class="conversation-header">
-                        <strong>Conversation</strong>
+                        <strong>Conversation #${conv.id}</strong>
                         <span class="timestamp">${new Date(conv.timestamp).toLocaleString()}</span>
                     </div>
                     <div class="message">
@@ -475,15 +554,109 @@
             document.getElementById('conversationsList').innerHTML = conversationsHtml;
         }
 
-        // Filter users (placeholder)
-        function filterUsers() {
-            // This would filter the users list when implemented
-        }
-
         // Select user
         function selectUser(userId) {
             selectedUserId = userId;
+            // Update UI to show selected user
+            document.querySelectorAll('.user-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.user-item').classList.add('active');
             loadConversations();
+        }
+
+        // Create test user
+        async function createTestUser() {
+            const testUserId = `test_user_${Date.now()}`;
+            const testStatus = document.getElementById('testStatus');
+            
+            try {
+                testStatus.innerHTML = '<div style="color: #666;">Creating test user...</div>';
+                
+                // First, get context (this will create the user)
+                const contextResponse = await fetch(`${API_BASE}/api/memory/get-context`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ user_id: testUserId })
+                });
+                
+                if (contextResponse.ok) {
+                    // Update profile with test data
+                    const profileResponse = await fetch(`${API_BASE}/api/memory/update-profile`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ 
+                            user_id: testUserId,
+                            name: `Test User ${Date.now().toString().slice(-4)}`,
+                            personality_type: 'Friendly',
+                            communication_style: 'Casual',
+                            onboarding_complete: true
+                        })
+                    });
+                    
+                    if (profileResponse.ok) {
+                        testStatus.innerHTML = '<div style="color: #2e7d32;">✅ Test user created successfully!</div>';
+                        loadUsers();
+                    } else {
+                        throw new Error('Failed to update profile');
+                    }
+                } else {
+                    throw new Error('Failed to create user');
+                }
+            } catch (error) {
+                testStatus.innerHTML = `<div style="color: #c62828;">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        // Add test conversation
+        async function addTestConversation() {
+            if (!selectedUserId) {
+                document.getElementById('testStatus').innerHTML = '<div style="color: #c62828;">❌ Please select a user first</div>';
+                return;
+            }
+            
+            const testStatus = document.getElementById('testStatus');
+            
+            try {
+                testStatus.innerHTML = '<div style="color: #666;">Adding test conversation...</div>';
+                
+                const testMessages = [
+                    { user: "Hello, how are you today?", ora: "Hi! I'm doing well, thank you for asking. How are you feeling today?" },
+                    { user: "I'm feeling a bit stressed about work.", ora: "I understand that work stress can be challenging. Would you like to talk about what's causing you stress?" },
+                    { user: "Yes, I have a big presentation tomorrow.", ora: "Presentations can definitely be nerve-wracking! Have you prepared for it? Sometimes talking through your preparation can help ease anxiety." }
+                ];
+                
+                const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
+                
+                const response = await fetch(`${API_BASE}/api/memory/save-conversation`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: selectedUserId,
+                        user_message: randomMessage.user,
+                        ora_response: randomMessage.ora,
+                        emotion: 'neutral',
+                        topic: 'general',
+                        session_id: `session_${Date.now()}`
+                    })
+                });
+                
+                if (response.ok) {
+                    testStatus.innerHTML = '<div style="color: #2e7d32;">✅ Test conversation added!</div>';
+                    loadConversations();
+                    loadUsers(); // Refresh to update conversation counts
+                } else {
+                    throw new Error('Failed to save conversation');
+                }
+            } catch (error) {
+                testStatus.innerHTML = `<div style="color: #c62828;">❌ Error: ${error.message}</div>`;
+            }
         }
 
         // Initialize the admin panel

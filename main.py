@@ -2,10 +2,14 @@ import os
 import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 from memory import memory_bp
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'ora-memory-secret-key-2024'
+
+# Enable CORS for all routes
+CORS(app)
 
 # Register memory routes
 app.register_blueprint(memory_bp, url_prefix='/api/memory')
@@ -73,7 +77,9 @@ def root():
             'get_user_context': '/api/memory/get-context',
             'save_conversation': '/api/memory/save-conversation',
             'update_profile': '/api/memory/update-profile',
-            'get_user_stats': '/api/memory/get-stats'
+            'get_user_stats': '/api/memory/get-stats',
+            'get_all_users': '/api/memory/get-all-users',
+            'search_conversations': '/api/memory/search-conversations'
         },
         'documentation': 'Send POST requests to the memory endpoints'
     })
@@ -92,6 +98,7 @@ if __name__ == '__main__':
     print("📊 Database: SQLite")
     print("🧠 Memory: Enabled")
     print("🎯 Admin Panel: Available at /admin")
+    print("🌐 CORS: Enabled")
     
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)
