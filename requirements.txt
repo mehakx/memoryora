@@ -6,3 +6,4 @@ pydub
 gunicorn
 hume
 openai
+pysqlite3-binary
