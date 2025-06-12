@@ -1,5 +1,5 @@
 import os
-import sqlite3
+import json
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -14,47 +14,21 @@ CORS(app)
 # Register memory routes
 app.register_blueprint(memory_bp, url_prefix='/api/memory')
 
-# Initialize SQLite database
-def init_db():
-    """Initialize SQLite database with required tables"""
-    db_path = os.path.join(os.path.dirname(__file__), 'ora_memory.db')
+# Initialize JSON data file
+def init_data():
+    """Initialize JSON data file with required structure"""
+    data_file = os.path.join(os.path.dirname(__file__), 'ora_memory.json')
     
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # Users table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            name TEXT,
-            personality_type TEXT,
-            communication_style TEXT,
-            first_visit TIMESTAMP,
-            last_visit TIMESTAMP,
-            onboarding_complete BOOLEAN DEFAULT 0,
-            preferences TEXT,
-            total_conversations INTEGER DEFAULT 0
-        )
-    ''')
-    
-    # Conversations table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            timestamp TIMESTAMP,
-            user_message TEXT,
-            ora_response TEXT,
-            emotion TEXT,
-            topic TEXT,
-            session_id TEXT,
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print(f"✅ Database initialized")
+    if not os.path.exists(data_file):
+        initial_data = {
+            'users': {},
+            'conversations': []
+        }
+        with open(data_file, 'w') as f:
+            json.dump(initial_data, f, indent=2)
+        print(f"✅ Data file initialized: {data_file}")
+    else:
+        print(f"✅ Data file exists: {data_file}")
 
 # Health check endpoint
 @app.route('/health')
@@ -91,11 +65,11 @@ def admin_panel():
     return send_from_directory('.', 'admin.html')
 
 if __name__ == '__main__':
-    # Initialize database on startup
-    init_db()
+    # Initialize data file on startup
+    init_data()
     
     print("🚀 Starting ORA Memory API...")
-    print("📊 Database: SQLite")
+    print("📊 Database: JSON File Storage")
     print("🧠 Memory: Enabled")
     print("🎯 Admin Panel: Available at /admin")
     print("🌐 CORS: Enabled")

@@ -1,45 +1,60 @@
 import os
-import sqlite3
 import json
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 
 memory_bp = Blueprint('memory', __name__)
 
-def get_db_connection():
-    """Get SQLite database connection"""
-    db_path = os.path.join(os.path.dirname(__file__), 'ora_memory.db')
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row  # This enables column access by name
-    return conn
+def get_data_file_path():
+    """Get path to JSON data file"""
+    return os.path.join(os.path.dirname(__file__), 'ora_memory.json')
+
+def load_data():
+    """Load data from JSON file"""
+    data_file = get_data_file_path()
+    if not os.path.exists(data_file):
+        return {'users': {}, 'conversations': []}
+    
+    try:
+        with open(data_file, 'r') as f:
+            return json.load(f)
+    except:
+        return {'users': {}, 'conversations': []}
+
+def save_data(data):
+    """Save data to JSON file"""
+    data_file = get_data_file_path()
+    with open(data_file, 'w') as f:
+        json.dump(data, f, indent=2)
 
 @memory_bp.route('/get-context', methods=['POST'])
 def get_user_context():
     """Get user context for personalized AI responses"""
     try:
-        data = request.get_json()
-        user_id = data.get('user_id')
+        request_data = request.get_json()
+        user_id = request_data.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'user_id is required'}), 400
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        data = load_data()
         
-        # Get user profile
-        cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
-        user = cursor.fetchone()
-        
-        if not user:
+        if user_id not in data['users']:
             # New user - create profile
             now = datetime.now().isoformat()
-            cursor.execute('''
-                INSERT INTO users (user_id, first_visit, last_visit, onboarding_complete, total_conversations)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (user_id, now, now, False, 0))
-            conn.commit()
+            data['users'][user_id] = {
+                'user_id': user_id,
+                'name': None,
+                'personality_type': None,
+                'communication_style': None,
+                'first_visit': now,
+                'last_visit': now,
+                'onboarding_complete': False,
+                'total_conversations': 0,
+                'preferences': None
+            }
+            save_data(data)
             
-            conn.close()
             return jsonify({
                 'is_new_user': True,
                 'user_id': user_id,
@@ -49,22 +64,15 @@ def get_user_context():
                 'suggested_response': "Hi! I'm ORA, your wellness companion. What's your name?"
             })
         
-        # Existing user - get recent conversations
-        cursor.execute('''
-            SELECT user_message, ora_response, emotion, topic, timestamp 
-            FROM conversations 
-            WHERE user_id = ? 
-            ORDER BY timestamp DESC 
-            LIMIT 5
-        ''', (user_id,))
+        user = data['users'][user_id]
         
-        recent_conversations = cursor.fetchall()
+        # Get recent conversations
+        user_conversations = [conv for conv in data['conversations'] if conv['user_id'] == user_id]
+        recent_conversations = sorted(user_conversations, key=lambda x: x['timestamp'], reverse=True)[:5]
         
         # Update last visit
-        cursor.execute('UPDATE users SET last_visit = ? WHERE user_id = ?', 
-                      (datetime.now().isoformat(), user_id))
-        conn.commit()
-        conn.close()
+        user['last_visit'] = datetime.now().isoformat()
+        save_data(data)
         
         # Build context string
         context_parts = []
@@ -84,7 +92,7 @@ def get_user_context():
         # Add recent conversation history
         if recent_conversations:
             context_parts.append("Recent conversation history:")
-            for conv in reversed(list(recent_conversations)[-3:]):  # Last 3 conversations
+            for conv in reversed(recent_conversations[-3:]):  # Last 3 conversations
                 context_parts.append(f"User: {conv['user_message']}")
                 context_parts.append(f"ORA: {conv['ora_response']}")
         
@@ -107,37 +115,41 @@ def get_user_context():
 
 @memory_bp.route('/save-conversation', methods=['POST'])
 def save_conversation():
-    """Save conversation to database"""
+    """Save conversation to JSON file"""
     try:
-        data = request.get_json()
-        user_id = data.get('user_id')
-        user_message = data.get('user_message')
-        ora_response = data.get('ora_response')
-        emotion = data.get('emotion', '')
-        topic = data.get('topic', '')
-        session_id = data.get('session_id', '')
+        request_data = request.get_json()
+        user_id = request_data.get('user_id')
+        user_message = request_data.get('user_message')
+        ora_response = request_data.get('ora_response')
+        emotion = request_data.get('emotion', '')
+        topic = request_data.get('topic', '')
+        session_id = request_data.get('session_id', '')
         
         if not all([user_id, user_message, ora_response]):
             return jsonify({'error': 'user_id, user_message, and ora_response are required'}), 400
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        data = load_data()
         
-        # Save conversation
-        cursor.execute('''
-            INSERT INTO conversations (user_id, timestamp, user_message, ora_response, emotion, topic, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, datetime.now().isoformat(), user_message, ora_response, emotion, topic, session_id))
+        # Create conversation record
+        conversation = {
+            'id': len(data['conversations']) + 1,
+            'user_id': user_id,
+            'timestamp': datetime.now().isoformat(),
+            'user_message': user_message,
+            'ora_response': ora_response,
+            'emotion': emotion,
+            'topic': topic,
+            'session_id': session_id
+        }
+        
+        data['conversations'].append(conversation)
         
         # Update user's total conversation count
-        cursor.execute('''
-            UPDATE users 
-            SET total_conversations = total_conversations + 1, last_visit = ?
-            WHERE user_id = ?
-        ''', (datetime.now().isoformat(), user_id))
+        if user_id in data['users']:
+            data['users'][user_id]['total_conversations'] += 1
+            data['users'][user_id]['last_visit'] = datetime.now().isoformat()
         
-        conn.commit()
-        conn.close()
+        save_data(data)
         
         return jsonify({
             'status': 'saved',
@@ -152,48 +164,30 @@ def save_conversation():
 def get_all_users():
     """Get all users for admin panel"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        data = load_data()
         
-        # Get all users with their stats
-        cursor.execute('''
-            SELECT 
-                u.user_id,
-                u.name,
-                u.personality_type,
-                u.communication_style,
-                u.first_visit,
-                u.last_visit,
-                u.total_conversations,
-                u.onboarding_complete,
-                COUNT(c.id) as actual_conversations
-            FROM users u
-            LEFT JOIN conversations c ON u.user_id = c.user_id
-            GROUP BY u.user_id
-            ORDER BY u.last_visit DESC
-        ''')
+        users = []
+        for user_id, user_data in data['users'].items():
+            # Count actual conversations
+            actual_conversations = len([conv for conv in data['conversations'] if conv['user_id'] == user_id])
+            user_info = user_data.copy()
+            user_info['actual_conversations'] = actual_conversations
+            users.append(user_info)
         
-        users = cursor.fetchall()
+        # Sort by last visit
+        users.sort(key=lambda x: x.get('last_visit', ''), reverse=True)
         
         # Get overall stats
-        cursor.execute('SELECT COUNT(DISTINCT user_id) as total_users FROM users')
-        total_users_result = cursor.fetchone()
-        total_users = total_users_result['total_users'] if total_users_result else 0
-        
-        cursor.execute('SELECT COUNT(*) as total_conversations FROM conversations')
-        total_conversations_result = cursor.fetchone()
-        total_conversations = total_conversations_result['total_conversations'] if total_conversations_result else 0
+        total_users = len(data['users'])
+        total_conversations = len(data['conversations'])
         
         # Calculate active today
         today = datetime.now().date().isoformat()
-        cursor.execute('SELECT COUNT(DISTINCT user_id) as active_today FROM users WHERE DATE(last_visit) = ?', (today,))
-        active_today_result = cursor.fetchone()
-        active_today = active_today_result['active_today'] if active_today_result else 0
-        
-        conn.close()
+        active_today = sum(1 for user in data['users'].values() 
+                          if user.get('last_visit', '').startswith(today))
         
         return jsonify({
-            'users': [dict(row) for row in users],
+            'users': users,
             'stats': {
                 'total_users': total_users,
                 'total_conversations': total_conversations,
@@ -208,38 +202,24 @@ def get_all_users():
 def search_conversations():
     """Search conversations for a specific user"""
     try:
-        data = request.get_json()
-        user_id = data.get('user_id')
-        limit = data.get('limit', 50)
+        request_data = request.get_json()
+        user_id = request_data.get('user_id')
+        limit = request_data.get('limit', 50)
         
         if not user_id:
             return jsonify({'error': 'user_id is required'}), 400
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        data = load_data()
         
         # Get conversations for the user
-        cursor.execute('''
-            SELECT 
-                id,
-                user_id,
-                timestamp,
-                user_message,
-                ora_response,
-                emotion,
-                topic,
-                session_id
-            FROM conversations 
-            WHERE user_id = ? 
-            ORDER BY timestamp DESC 
-            LIMIT ?
-        ''', (user_id, limit))
+        user_conversations = [conv for conv in data['conversations'] if conv['user_id'] == user_id]
+        user_conversations.sort(key=lambda x: x['timestamp'], reverse=True)
         
-        conversations = cursor.fetchall()
-        conn.close()
+        # Apply limit
+        conversations = user_conversations[:limit]
         
         return jsonify({
-            'results': [dict(row) for row in conversations],
+            'results': conversations,
             'count': len(conversations),
             'user_id': user_id
         })
@@ -251,57 +231,56 @@ def search_conversations():
 def update_profile():
     """Update user profile information"""
     try:
-        data = request.get_json()
-        user_id = data.get('user_id')
+        request_data = request.get_json()
+        user_id = request_data.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'user_id is required'}), 400
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        data = load_data()
         
-        # Build update query dynamically based on provided fields
-        update_fields = []
-        values = []
+        # Ensure user exists
+        if user_id not in data['users']:
+            now = datetime.now().isoformat()
+            data['users'][user_id] = {
+                'user_id': user_id,
+                'name': None,
+                'personality_type': None,
+                'communication_style': None,
+                'first_visit': now,
+                'last_visit': now,
+                'onboarding_complete': False,
+                'total_conversations': 0,
+                'preferences': None
+            }
         
-        if 'name' in data:
-            update_fields.append('name = ?')
-            values.append(data['name'])
+        user = data['users'][user_id]
         
-        if 'personality_type' in data:
-            update_fields.append('personality_type = ?')
-            values.append(data['personality_type'])
+        # Update fields
+        if 'name' in request_data:
+            user['name'] = request_data['name']
         
-        if 'communication_style' in data:
-            update_fields.append('communication_style = ?')
-            values.append(data['communication_style'])
+        if 'personality_type' in request_data:
+            user['personality_type'] = request_data['personality_type']
         
-        if 'onboarding_complete' in data:
-            update_fields.append('onboarding_complete = ?')
-            values.append(data['onboarding_complete'])
+        if 'communication_style' in request_data:
+            user['communication_style'] = request_data['communication_style']
         
-        if 'preferences' in data:
-            update_fields.append('preferences = ?')
-            values.append(json.dumps(data['preferences']))
+        if 'onboarding_complete' in request_data:
+            user['onboarding_complete'] = request_data['onboarding_complete']
         
-        if not update_fields:
-            return jsonify({'error': 'No fields to update'}), 400
+        if 'preferences' in request_data:
+            user['preferences'] = request_data['preferences']
         
-        # Add last_visit update
-        update_fields.append('last_visit = ?')
-        values.append(datetime.now().isoformat())
-        values.append(user_id)
+        # Update last visit
+        user['last_visit'] = datetime.now().isoformat()
         
-        query = f"UPDATE users SET {', '.join(update_fields)} WHERE user_id = ?"
-        cursor.execute(query, values)
-        
-        conn.commit()
-        conn.close()
+        save_data(data)
         
         return jsonify({
             'status': 'updated',
             'user_id': user_id,
-            'updated_fields': list(data.keys())
+            'updated_fields': list(request_data.keys())
         })
         
     except Exception as e:
@@ -311,32 +290,26 @@ def update_profile():
 def get_user_stats():
     """Get detailed stats for a specific user"""
     try:
-        data = request.get_json()
-        user_id = data.get('user_id')
+        request_data = request.get_json()
+        user_id = request_data.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'user_id is required'}), 400
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        data = load_data()
         
-        # Get user info
-        cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
-        user = cursor.fetchone()
-        
-        if not user:
+        if user_id not in data['users']:
             return jsonify({'error': 'User not found'}), 404
         
+        user = data['users'][user_id]
+        
         # Get conversation stats
-        cursor.execute('SELECT COUNT(*) as total FROM conversations WHERE user_id = ?', (user_id,))
-        total_conversations = cursor.fetchone()['total']
+        user_conversations = [conv for conv in data['conversations'] if conv['user_id'] == user_id]
+        total_conversations = len(user_conversations)
         
         # Get recent activity (last 7 days)
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        cursor.execute('SELECT COUNT(*) as recent FROM conversations WHERE user_id = ? AND timestamp > ?', (user_id, week_ago))
-        recent_conversations = cursor.fetchone()['recent']
-        
-        conn.close()
+        recent_conversations = len([conv for conv in user_conversations if conv['timestamp'] > week_ago])
         
         return jsonify({
             'user_id': user_id,
